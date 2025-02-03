@@ -12,9 +12,30 @@
 #define PORT 1337
 #define BUFFER_SIZE 1024
 
+int count_bits(uint8_t *addr, int family) {
+    int count = 0;
+    if (family == AF_INET) { // IPv4
+        uint32_t mask = ntohl(*(uint32_t *)addr);
+        while (mask) {
+            count += mask & 1;
+            mask >>= 1;
+        }
+    } else if (family == AF_INET6) { // IPv6
+        for (int i = 0; i < 16; i++) {
+            uint8_t byte = addr[i];
+            while (byte) {
+                count += byte & 1;
+                byte >>= 1;
+            }
+        }
+    }
+    return count;
+}
+
 void list_interfaces(char *output, size_t size) {
     struct ifaddrs *ifaddr, *ifa;
     char buffer[INET6_ADDRSTRLEN];
+    
 
     if (getifaddrs(&ifaddr) == -1) {
         snprintf(output, size, "Erreur lors de la récupération des interfaces.\n");
@@ -27,17 +48,20 @@ void list_interfaces(char *output, size_t size) {
 
         void *addr;
         int family = ifa->ifa_addr->sa_family;
+        int cidr = -1;
 
         if (family == AF_INET) { // IPv4
             addr = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
+            cidr = count_bits((uint8_t *)&((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr, AF_INET);
         } else if (family == AF_INET6) { // IPv6
             addr = &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr;
+            cidr = count_bits((uint8_t *)&((struct sockaddr_in6 *)ifa->ifa_netmask)->sin6_addr, AF_INET6);
         } else {
             continue;
         }
 
         inet_ntop(family, addr, buffer, sizeof(buffer));
-        snprintf(output + strlen(output), size - strlen(output), "%s: %s\n", ifa->ifa_name, buffer);
+        snprintf(output + strlen(output), size - strlen(output), "%s: %s/%d\n", ifa->ifa_name, buffer, cidr);
     }
 
     freeifaddrs(ifaddr);
@@ -60,21 +84,22 @@ void get_interface_info(const char *ifname, char *output, size_t size) {
 
         void *addr, *mask;
         int family = ifa->ifa_addr->sa_family;
+        int cidr = -1;
 
         if (family == AF_INET) { // IPv4
             addr = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
-            mask = &((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr;
+            cidr = count_bits((uint8_t *)&((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr, AF_INET);
         } else if (family == AF_INET6) { // IPv6
             addr = &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr;
-            mask = &((struct sockaddr_in *)ifa->ifa_netmask)->sin_addr;
+            cidr = count_bits((uint8_t *)&((struct sockaddr_in6 *)ifa->ifa_netmask)->sin6_addr, AF_INET6);
         } else {
             continue;
         }
 
         inet_ntop(family, addr, buffer, sizeof(buffer));
-        inet_ntop(family, mask, mask_buffer, sizeof(mask_buffer));
 
-        snprintf(output + strlen(output), size - strlen(output), "%s: %s/%s\n", ifa->ifa_name, buffer, mask_buffer);
+        snprintf(output + strlen(output), size - strlen(output), "%s: %s/%d\n", ifa->ifa_name, buffer, cidr);
+
     }
 
     if (output[0] == '\0') {
